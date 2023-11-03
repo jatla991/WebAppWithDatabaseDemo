@@ -47,9 +47,7 @@ stages:
       steps:
         - task: MSBuild@1
           inputs:
-            solution: '**/*.sqlproj'
-            platform: 'Any CPU'
-            configuration: '$(BuildConfiguration)'
+            solution: 'WebApp.Database/WebApp.Database.sqlproj'
             msbuildArguments: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
         
         - task: PublishBuildArtifacts@1
