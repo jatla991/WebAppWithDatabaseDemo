@@ -1,4 +1,4 @@
-# Starter pipeline
+ # Starter pipeline
 # Start with a minimal pipeline that you can customize to build and deploy your code.
 # Add steps that build, run tests, deploy, and more:
 # https://aka.ms/yaml
@@ -42,3 +42,20 @@ stages:
             Contents: '*.zip'
             ArtifactName: 'webapp'
             ArtifactType: 'Container'
+
+    - job: Database
+      steps:
+        - task: MSBuild@1
+          inputs:
+            solution: '**/*.sqlproj'
+            platform: 'Any CPU'
+            configuration: '$(BuildConfiguration)'
+            msbuildArguments: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
+        
+        - task: PublishBuildArtifacts@1
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+            ArtifactName: 'dacpac'
+            publishLocation: 'Container'
+        
+        
