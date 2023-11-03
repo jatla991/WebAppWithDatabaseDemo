@@ -1,0 +1,44 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- master
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+   BuildConfiguration: 'Release'
+   projectFile: '**/WebApp.csproj'
+
+stages:
+  - stage: Build
+    jobs:
+    - job: Build
+      steps:
+        - task: DotNetCoreCLI@2
+          inputs:
+            command: 'restore'
+            projects: '$(projectFile)'
+            feedsToUse: 'select'
+        
+        - task: DotNetCoreCLI@2
+          inputs:
+            command: 'build'
+            projects: '$(projectFile)'
+            arguments: '--configuration $(BuildConfiguration)'
+        
+        - task: DotNetCoreCLI@2
+          inputs:
+            command: 'publish'
+            publishWebProjects: true
+            arguments: '--configuration $(BuildConfiguration) --output $(System.DefaultWorkingDirectory)'
+        
+        - task: CopyPublishBuildArtifacts@1
+          inputs:
+            CopyRoot: '$(System.DefaultWorkingDirectory)'
+            Contents: '*.zip'
+            ArtifactName: 'webapp'
+            ArtifactType: 'Container'
