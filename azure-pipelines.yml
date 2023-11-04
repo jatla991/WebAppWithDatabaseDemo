@@ -1,59 +1,137 @@
- # Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
+trigger: 'none' # will disable CI builds entirely
+# - master
+pr: none
+# - master
+# - releases/*
 
-trigger:
-- master
+jobs:
+- job: WebApp
+  displayName: 'Build Web App'
+  pool:
+    vmImage: 'windows-2019'
+  variables:
+    BuildConfiguration: release
+  
+  steps:
+  
+  - task: UseDotNet@2
+    displayName: Install .NET 6 sdk
+    inputs:
+      packageType: sdk
+      version: 6.0.x
+      installationPath: $(Agent.ToolsDirectory)/dotnet
 
-pool:
-  vmImage: ubuntu-latest
+  - task: DotNetCoreCLI@2
+    displayName: Restore
+    inputs:
+      command: restore
+      projects: '**/WebApp.csproj'
+  
+  - powershell: |
+     $paths = Get-ChildItem -include *.csproj -Recurse
+     foreach($pathobject in $paths) 
+     {
+         $path = $pathobject.fullname
+         $doc = New-Object System.Xml.XmlDocument
+         $doc.Load($path)
+         $child = $doc.CreateElement("ProjectGuid")
+         $child.InnerText = [guid]::NewGuid().ToString().ToUpper()
+         $node = $doc.SelectSingleNode("//Project/PropertyGroup")
+         $node.AppendChild($child)
+         $doc.Save($path)
+     }
+    workingDirectory: WebApp
+    displayName: 'PS : Add Project GUID'
+    enabled: false
+  
+  - task: SonarCloudPrepare@1
+    displayName: 'Prepare analysis on SonarCloud'
+    inputs:
+      SonarCloud: SonarCloud
+      organization: houssemdellai
+      projectKey: WebAppWithDatabaseDemo
+  
+  - task: DotNetCoreCLI@2
+    displayName: Build
+    inputs:
+      projects: '**/WebApp.csproj'
+      arguments: '--configuration $(BuildConfiguration)'
+  
+  - task: DotNetCoreCLI@2
+    displayName: Test
+    inputs:
+      command: test
+      projects: '**/*UnitTest*.csproj'
+      arguments: '--configuration $(BuildConfiguration)'
+  
+  - task: DotNetCoreCLI@2
+    displayName: Publish
+    inputs:
+      command: publish
+      publishWebProjects: True
+      arguments: '--configuration $(BuildConfiguration) --output $(build.artifactstagingdirectory)'
+      zipAfterPublish: True
+  
+  - task: SonarCloudAnalyze@1
+    displayName: 'Run Code Analysis'
+  
+  - task: SonarCloudPublish@1
+    displayName: 'Publish Quality Gate Result'
+  
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact (WebApp.zip)'
+    inputs:
+      PathtoPublish: '$(build.artifactstagingdirectory)'
 
-variables:
-   BuildConfiguration: 'Release'
-   projectFile: '**/WebApp.csproj'
+- job: Database
+  displayName: 'Build Database'
+  pool:
+    vmImage: 'windows-2019'
 
-stages:
-  - stage: Build
-    jobs:
-    - job: Build
-      steps:
-        - task: DotNetCoreCLI@2
-          inputs:
-            command: 'restore'
-            projects: '$(projectFile)'
-            feedsToUse: 'select'
-        
-        - task: DotNetCoreCLI@2
-          inputs:
-            command: 'build'
-            projects: '$(projectFile)'
-            arguments: '--configuration $(BuildConfiguration)'
-        
-        - task: DotNetCoreCLI@2
-          inputs:
-            command: 'publish'
-            publishWebProjects: true
-            arguments: '--configuration $(BuildConfiguration) --output $(System.DefaultWorkingDirectory)'
-        
-        - task: CopyPublishBuildArtifacts@1
-          inputs:
-            CopyRoot: '$(System.DefaultWorkingDirectory)'
-            Contents: '*.zip'
-            ArtifactName: 'webapp'
-            ArtifactType: 'Container'
+  steps:
+  - task: MSBuild@1
+    displayName: 'Build solution WebApp.Database.sqlproj'
+    inputs:
+      solution: WebApp.Database/WebApp.Database.sqlproj
+      msbuildArguments: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
+  
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact (Dacpac)'
+    inputs:
+      ArtifactName: dacpac
 
-    - job: Database
-      steps:
-        - task: MSBuild@1
-          inputs:
-            solution: 'WebApp.Database/WebApp.Database.sqlproj'
-            msbuildArguments: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
-        
-        - task: PublishBuildArtifacts@1
-          inputs:
-            PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-            ArtifactName: 'dacpac'
-            publishLocation: 'Container'
-        
-        
+- job: Selenium
+  displayName: 'Build UI Tests'
+  pool:
+    vmImage: 'windows-2019'
+
+  steps:
+  - task: NuGetToolInstaller@0
+    displayName: 'Use NuGet 4.3.0'
+
+  - task: NuGetCommand@2
+    displayName: 'NuGet restore'
+    inputs:
+      restoreSolution: WebAppWithDatabase.sln
+
+  - task: MSBuild@1
+    displayName: 'Build project SeleniumUiTests.csproj'
+    inputs:
+      solution: SeleniumUiTests/SeleniumUiTests.csproj
+      msbuildArguments: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
+
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: UI-Test'
+    inputs:
+      ArtifactName: 'UI-Test'
+
+- job: Infrastructure
+  displayName: 'Copy Infrastructure files (ARM)'
+  pool:
+    vmImage: 'ubuntu-latest'
+  steps:
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: ARM templates'
+    inputs:
+      PathtoPublish: AzureResourceGroupDeployment
+      ArtifactName: arm
